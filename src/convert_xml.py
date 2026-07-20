@@ -1,12 +1,8 @@
 import os
 import xml.etree.ElementTree as ET
 
-# Path to your XML files
-xml_dir = 'dataset/train/labels'
-# The exact class name you used in LabelImg
-classes = ['license_plate'] 
-
-def convert_coordinates(size, box):
+def convert_box(size, box):
+    # Normalized YOLO format: center_x, center_y, width, height (all 0 to 1)
     dw = 1.0 / size[0]
     dh = 1.0 / size[1]
     x = (box[0] + box[1]) / 2.0
@@ -15,39 +11,60 @@ def convert_coordinates(size, box):
     h = box[3] - box[2]
     return (x * dw, y * dh, w * dw, h * dh)
 
-print("Starting XML to YOLO TXT conversion...")
-converted_count = 0
-
-for xml_file in os.listdir(xml_dir):
-    if not xml_file.endswith('.xml'):
-        continue
+def main():
+    lbl_dir = 'dataset/train/labels'
+    # Define the exact class name found in your XML
+    classes = ['numberplate']
     
-    file_path = os.path.join(xml_dir, xml_file)
-    tree = ET.parse(file_path)
-    root = tree.getroot()
+    print("Starting robust XML to YOLO TXT conversion...")
+    xml_files = [f for f in os.listdir(lbl_dir) if f.lower().endswith('.xml')]
     
-    size = root.find('size')
-    w = int(size.find('width').text)
-    h = int(size.find('height').text)
+    converted_count = 0
     
-    txt_filename = os.path.join(xml_dir, xml_file.replace('.xml', '.txt'))
-    
-    with open(txt_filename, 'w') as out_file:
-        for obj in root.iter('object'):
-            cls = obj.find('name').text
-            if cls not in classes:
+    for xml_file in xml_files:
+        xml_path = os.path.join(lbl_dir, xml_file)
+        txt_path = os.path.join(lbl_dir, xml_file.replace('.xml', '.txt'))
+        
+        try:
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            
+            # Get image dimensions
+            size_tag = root.find('size')
+            if size_tag is None:
                 continue
-            cls_id = classes.index(cls)
+            width = int(size_tag.find('width').text)
+            height = int(size_tag.find('height').text)
             
-            xmlbox = obj.find('bndbox')
-            b = (float(xmlbox.find('xmin').text), 
-                 float(xmlbox.find('xmax').text), 
-                 float(xmlbox.find('ymin').text), 
-                 float(xmlbox.find('ymax').text))
+            yolo_lines = []
             
-            bb = convert_coordinates((w, h), b)
-            out_file.write(f"{cls_id} {' '.join([f'{a:.6f}' for a in bb])}\n")
-    
-    converted_count += 1
+            # Loop through all objects in the XML
+            for obj in root.findall('object'):
+                cls_name = obj.find('name').text.strip().lower()  # strip spaces and match lowercase
+                
+                if cls_name in classes:
+                    cls_id = classes.index(cls_name)
+                    xml_box = obj.find('bndbox')
+                    
+                    xmin = float(xml_box.find('xmin').text)
+                    ymin = float(xml_box.find('ymin').text)
+                    xmax = float(xml_box.find('xmax').text)
+                    ymax = float(xml_box.find('ymax').text)
+                    
+                    # Convert coordinates to YOLO format
+                    bb = convert_box((width, height), (xmin, xmax, ymin, ymax))
+                    yolo_lines.append(f"{cls_id} {bb[0]:.6f} {bb[1]:.6f} {bb[2]:.6f} {bb[3]:.6f}\n")
+            
+            # Only write the text file if we actually found bounding boxes
+            if yolo_lines:
+                with open(txt_path, 'w') as f:
+                    f.writelines(yolo_lines)
+                converted_count += 1
+                
+        except Exception as e:
+            print(f"Error processing {xml_file}: {e}")
 
-print(f"Success! Converted {converted_count} XML files to YOLO TXT format.")
+    print(f"Success! Converted {converted_count} XML files with valid bounding boxes.")
+
+if __name__ == '__main__':
+    main()

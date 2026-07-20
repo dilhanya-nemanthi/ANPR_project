@@ -1,1 +1,7 @@
-#YOLO configuration file pointing to the dataset
+path: ./dataset
+train: train/images
+val: val/images
+
+# Classes
+nc: 1
+names: ['numberplate']
