@@ -6,7 +6,7 @@ def main():
     print("--- Script Started ---")
     
     # 1. Check if the model exists
-    model_path = r"runs\detect\runs\train\yolov8n_custom\weights\best.pt"
+    model_path = r"runs\detect\GPU_Results\training_run_1-3"
     if not os.path.exists(model_path):
         print(f"ERROR: Cannot find model at {model_path}")
         return
