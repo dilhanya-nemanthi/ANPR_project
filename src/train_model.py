@@ -24,11 +24,12 @@ def main():
     # Train on GPU
     results = model.train(
         data=str(data_yaml_path),
-        epochs=100,
+        epochs=80,
         imgsz=640,
-        device=0,            
+        device=0, 
+        amp=False,           
         project='GPU_Results',
-        name='training_run_1'
+        name='training_run_FP32'
     )
 
 if __name__ == '__main__':

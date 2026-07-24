@@ -6,13 +6,13 @@ def main():
     print("--- Script Started ---")
     
     # 1. Check if the model exists
-    model_path = r"runs\detect\GPU_Results\training_run_1-3"
+    model_path = r"runs\detect\GPU_Results\training_run_FP32\weights\best.pt"
     if not os.path.exists(model_path):
         print(f"ERROR: Cannot find model at {model_path}")
         return
 
     # 2. Check if the test image exists
-    image_path = "test_car.avif" 
+    image_path = "test3.jpg"  # Update this path to your test image
     if not os.path.exists(image_path):
         print(f"ERROR: Cannot find image at {image_path}. Did you name it correctly and place it in the ANPR_project folder?")
         return
@@ -21,7 +21,7 @@ def main():
     model = YOLO(model_path)
 
     print(f"Running detection on {image_path}...")
-    results = model.predict(source=image_path, save=True)
+    results = model.predict(source=image_path, save=True,conf=0.4)
 
     print("Opening window...")
     annotated_img = results[0].plot()
