@@ -2,3 +2,5 @@
 dataset/
 models/best.pt
 runs/
+tst_imgs
+test1.webp

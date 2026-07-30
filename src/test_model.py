@@ -12,7 +12,7 @@ def main():
         return
 
     # 2. Check if the test image exists
-    image_path = "test3.jpg"  # Update this path to your test image
+    image_path = "tst_imgs"  # Update this path to your test image
     if not os.path.exists(image_path):
         print(f"ERROR: Cannot find image at {image_path}. Did you name it correctly and place it in the ANPR_project folder?")
         return
