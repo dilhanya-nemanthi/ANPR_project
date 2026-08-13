@@ -162,6 +162,7 @@ def main():
     rtsp_url = 'rtsp://admin:It%40123aasl@10.64.64.16/Streaming/channels/001/?transportmode=unicast'
     
     # 1. Define model paths
+    
     yolo_path = r"runs\detect\GPU_Results\training_run_FP32-2\weights\best.pt"
     wpod_path = r"weights\wpodnet.pth"  # Using your local PyTorch weights!
 
