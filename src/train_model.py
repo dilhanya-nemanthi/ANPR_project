@@ -1,36 +1,30 @@
-import os
-from pathlib import Path
 from ultralytics import YOLO
 
-def main():
-   
-   
-    
-    
-    data_yaml_path = Path(r"C:\Users\User\Desktop\ANPR_project\data.yaml")
-
-    # Check if the file exists before passing it to YOLO
-    if not data_yaml_path.exists():
-        print(f"\nERROR: Cannot find data.yaml at: {data_yaml_path}")
-        print("Please check your file tree in VS Code and verify where 'data.yaml' is located.\n")
-        return
-
-    print(f" Found dataset config at: {data_yaml_path}")
-    print("Starting GPU Training on NVIDIA RTX 2050...")
-
-    # Load base weights
+def train_model():
+    # 1. Load the pre-trained base model
     model = YOLO('yolov8n.pt')
-    
-    # Train on GPU
+
+    # 2. Train with anti-overfitting hyperparameters
     results = model.train(
-        data=str(data_yaml_path),
-        epochs=80,
+        data='data.yaml',
+        epochs=50,             # Upper limit; early stopping will handle termination
+        patience=20,            # Stop training if val loss doesn't improve for 20 epochs
         imgsz=640,
-        device=0, 
-        amp=False,           
-        project='GPU_Results',
-        name='training_run_FP32'
+        batch=16,               # Reduce to 8 if you run into GPU memory errors
+        device=0,               # Set to 'cpu' if no dedicated NVIDIA GPU is available
+        workers=2,
+        
+        # Augmentations to improve CCTV generalization
+        mosaic=1.0,             # Combines 4 images to destroy background memorization
+        mixup=0.1,              # Blends images together
+        hsv_h=0.015,            # Slight color hue shifts
+        hsv_s=0.5,              # Saturation shifts for lighting changes
+        hsv_v=0.4,              # Brightness shifts (simulates shadow/glare)
+        degrees=10.0,           # Random rotations for tilted plates
+        
+        project='runs/detect',
+        name='yolov8n_anpr_run'
     )
 
 if __name__ == '__main__':
-    main()
+    train_model()

@@ -1,54 +1,57 @@
 import os
-import random
 import shutil
+import random
 
-# Define paths
-train_img_dir = 'dataset/train/images'
-train_lbl_dir = 'dataset/train/labels'
-val_img_dir = 'dataset/val/images'
-val_lbl_dir = 'dataset/val/labels'
+# --- CONFIGURATION ---
+SOURCE_IMAGES = r"C:\Users\User\Desktop\ANPR_project\VEHICLE_IMAGES\images"   # Path to your raw images folder
+SOURCE_LABELS = r"C:\Users\User\Desktop\ANPR_project\VEHICLE_IMAGES\labels"   # Path to your raw labels folder
+OUTPUT_DIR = r"dataset"      # Destination folder
+TRAIN_RATIO = 0.8           # 80% train, 20% validation
+# ---------------------
 
-# Create validation directories if they don't exist
-os.makedirs(val_img_dir, exist_ok=True)
-os.makedirs(val_lbl_dir, exist_ok=True)
+# 1. Create target directories
+for split in ['train', 'val']:
+    os.makedirs(os.path.join(OUTPUT_DIR, split, 'images'), exist_ok=True)
+    os.makedirs(os.path.join(OUTPUT_DIR, split, 'labels'), exist_ok=True)
 
-# Get all images currently in the train folder
-images = [f for f in os.listdir(train_img_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+# 2. Get list of valid images
+valid_extensions = ('.jpg', '.jpeg', '.png', '.webp')
+all_images = [f for f in os.listdir(SOURCE_IMAGES) if f.lower().endswith(valid_extensions)]
 
-# Define split percentage (e.g., 20% for validation)
-split_ratio = 0.20
-num_val_images = int(len(images) * split_ratio)
+# Shuffle for random distribution
+random.seed(42)  # Fixed seed for reproducibility
+random.shuffle(all_images)
 
-# Randomly select images to move to the validation set
-val_images = random.sample(images, num_val_images)
+# 3. Calculate split index
+split_idx = int(len(all_images) * TRAIN_RATIO)
+train_files = all_images[:split_idx]
+val_files = all_images[split_idx:]
 
-print(f"Total images found: {len(images)}")
-print(f"Moving {num_val_images} image-label pairs to the validation folder...")
+print(f"Total paired images found: {len(all_images)}")
+print(f"Splitting: {len(train_files)} -> Train | {len(val_files)} -> Validation\n")
 
-moved_count = 0
+def move_pairs(file_list, split_name):
+    for img_file in file_list:
+        base_name, _ = os.path.splitext(img_file)
+        lbl_file = f"{base_name}.txt"
 
-for img_name in val_images:
-    # Construct base file name without extension
-    base_name = os.path.splitext(img_name)[0]
-    lbl_name = f"{base_name}.txt"
-    
-    # Define source paths
-    src_img = os.path.join(train_img_dir, img_name)
-    src_lbl = os.path.join(train_lbl_dir, lbl_name)
-    
-    # Define destination paths
-    dst_img = os.path.join(val_img_dir, img_name)
-    dst_lbl = os.path.join(val_lbl_dir, lbl_name)
-    
-    # Move image if it exists
-    if os.path.exists(src_img):
-        shutil.move(src_img, dst_img)
-        
-        # Move corresponding label file if it exists
+        src_img = os.path.join(SOURCE_IMAGES, img_file)
+        src_lbl = os.path.join(SOURCE_LABELS, lbl_file)
+
+        dst_img = os.path.join(OUTPUT_DIR, split_name, 'images', img_file)
+        dst_lbl = os.path.join(OUTPUT_DIR, split_name, 'labels', lbl_file)
+
+        # Copy image
+        shutil.copy(src_img, dst_img)
+
+        # Copy label if it exists, or create empty txt for background images
         if os.path.exists(src_lbl):
-            shutil.move(src_lbl, dst_lbl)
-            moved_count += 1
+            shutil.copy(src_lbl, dst_lbl)
         else:
-            print(f"Warning: Missing label file for {img_name}")
+            with open(dst_lbl, 'w') as f:
+                pass  # Empty file for background images
 
-print(f"Successfully moved {moved_count} pairs to validation!")
+move_pairs(train_files, 'train')
+move_pairs(val_files, 'val')
+
+print(" Dataset successfully created and organized!")

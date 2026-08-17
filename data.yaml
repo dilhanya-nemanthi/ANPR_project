@@ -1,4 +1,5 @@
-path: ./dataset
+
+path: dataset  # Root dataset directory (or full absolute path)
 train: train/images
 val: val/images
 
