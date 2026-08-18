@@ -23,7 +23,7 @@ def train_model():
         degrees=10.0,           # Random rotations for tilted plates
         
         project='runs/detect',
-        name='yolov8n_anpr_run'
+        name='yolov8n_anpr_run2'
     )
 
 if __name__ == '__main__':
