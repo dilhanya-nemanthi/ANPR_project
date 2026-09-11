@@ -1,3 +1,5 @@
+#Training model with numberplates
+
 import os
 import cv2
 import torch
@@ -8,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 # --- CONFIGURATION ---
-CROPS_DIR = r"crops"
+CROPS_DIR = r"C:\Users\User\Desktop\ANPR_project\Number plates\plates-images"
 VOCAB = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 CHAR_TO_INT = {char: idx + 1 for idx, char in enumerate(VOCAB)}  # 0 is reserved for CTC blank token
 INT_TO_CHAR = {idx + 1: char for idx, char in enumerate(VOCAB)}
@@ -20,10 +22,12 @@ EPOCHS = 60
 LEARNING_RATE = 0.0005
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 # --- 1. DATASET CLASS ---
 class PlateDataset(Dataset):
     def __init__(self, csv_path, img_dir):
         self.df = pd.read_csv(csv_path, header=None, names=['filename', 'label'])
+    
         self.img_dir = img_dir
 
     def __len__(self):

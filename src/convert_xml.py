@@ -1,3 +1,4 @@
+#USED TO CONVERT XML FILES INTO YOLO TXT FILES
 import os
 import xml.etree.ElementTree as ET
 
@@ -10,6 +11,7 @@ def convert_box(size, box):
     w = box[1] - box[0]
     h = box[3] - box[2]
     return (x * dw, y * dh, w * dw, h * dh)
+
 
 def main():
     lbl_dir = 'dataset/train/labels'

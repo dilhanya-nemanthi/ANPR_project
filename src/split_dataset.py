@@ -1,3 +1,5 @@
+#splitting script for the first time
+
 import os
 import shutil
 import random
