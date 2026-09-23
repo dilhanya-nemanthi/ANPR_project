@@ -3,7 +3,7 @@ from ultralytics import YOLO
 
 # --- CONFIGURATION ---
 MODEL_PATH = r"runs\detect\runs\detect\yolov8n_augmented_scratch-3\weights\best.pt"
-UNLABELED_IMAGES_DIR = r"C:\Users\User\Desktop\NEW-images\imgs"
+UNLABELED_IMAGES_DIR = r"C:\Users\User\Downloads\vehicles_3354\vehicles_3354"
 OUTPUT_LABELS_DIR = r"C:\Users\User\Desktop\NEW-images\newlbls" 
 
 os.makedirs(OUTPUT_LABELS_DIR, exist_ok=True)
@@ -53,5 +53,22 @@ def auto_annotate():
     print(f"Labels saved to: {OUTPUT_LABELS_DIR}")
     print("-" * 40)
 
+def delete_empty_labels():
+    print("[*] Scanning for empty label files...")
+    empty_count = 0
+    
+    for f in os.listdir(OUTPUT_LABELS_DIR):
+        file_path = os.path.join(OUTPUT_LABELS_DIR, f)
+        
+        # os.path.getsize() returns the size of the file to check if it is 0 bytes
+        if os.path.isfile(file_path) and os.path.getsize(file_path) == 0:
+            # os.remove() deletes the file path from the system
+            os.remove(file_path)
+            empty_count += 1
+            
+    print(f"[*] Cleanup Complete: Deleted {empty_count} empty label files.")
+
 if __name__ == "__main__":
-    auto_annotate()
+    #auto_annotate()
+    # Call the new function immediately after annotation finishes
+    delete_empty_labels()

@@ -6,7 +6,7 @@ import random
 
 # --- CONFIGURATION ---
 # Source directories
-BASE_DIR = "VEHICLE_IMAGES"
+BASE_DIR = "NEW-images"
 SOURCE_IMAGES = os.path.join(BASE_DIR, "images")
 SOURCE_LABELS = os.path.join(BASE_DIR, "labels")
 

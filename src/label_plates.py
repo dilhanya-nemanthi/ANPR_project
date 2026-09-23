@@ -1,65 +1,105 @@
-#USED TO LABEL CROPPED PLATES IMAGES WITH THEIR TEXTS AND SAVE THEM IN A CSV FILE
 import os
-import cv2
+import csv
+import tkinter as tk
+from tkinter import messagebox
+from PIL import Image, ImageTk
 
-# Configuration
-CROPS_FOLDER = r"C:\Users\User\Desktop\ANPR_project\Number plates\plates-images"        # Ensure this points to your cropped plates folder
-OUTPUT_CSV = r"C:\Users\User\Desktop\ANPR_project\Number plates\plates-labels.csv"     # Output file path
+# --- CONFIGURATION ---
+CROPS_FOLDER = r"C:\Users\User\Desktop\ANPR_project\Number plates\plates_new_1"
+OUTPUT_CSV = r"C:\Users\User\Desktop\ANPR_project\Number plates\plates-labels.csv"
+VALID_EXTS = ('.jpg', '.jpeg', '.png', '.webp')
 
-valid_exts = ('.jpg', '.jpeg', '.png', '.webp')
-image_files = [f for f in os.listdir(CROPS_FOLDER) if f.lower().endswith(valid_exts)]
+class PlateLabelerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("ANPR Plate Labeler")
+        self.root.geometry("520x360")
+        self.root.resizable(False, False)
 
-# Load existing labels so you can resume if you stop halfway
-labeled = set()
-if os.path.exists(OUTPUT_CSV):
-    with open(OUTPUT_CSV, 'r') as f:
-        for line in f:
-            parts = line.strip().split(',')
-            if parts:
-                labeled.add(parts[0])
+        # Load existing labels to resume progress
+        self.labeled = set()
+        if os.path.exists(OUTPUT_CSV):
+            with open(OUTPUT_CSV, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if row:
+                        self.labeled.add(row[0])
 
-print(f"Total images: {len(image_files)} | Already labeled: {len(labeled)}")
-print("Instructions:")
-print("- Type the plate text and hit ENTER.")
-print("- Leave blank and hit ENTER to skip.")
-print("- Type 'exit' or press Ctrl+C to save and quit.\n")
+        # Scan for images
+        if not os.path.exists(CROPS_FOLDER):
+            messagebox.showerror("Error", f"Folder not found:\n{CROPS_FOLDER}")
+            root.destroy()
+            return
 
-with open(OUTPUT_CSV, 'a') as f:
-    try:
-        for idx, img_name in enumerate(image_files, 1):
-            if img_name in labeled:
-                continue
+        all_files = [f for f in os.listdir(CROPS_FOLDER) if f.lower().endswith(VALID_EXTS)]
+        self.image_files = [f for f in all_files if f not in self.labeled]
+        self.total_count = len(all_files)
+        self.current_idx = 0
 
-            img_path = os.path.join(CROPS_FOLDER, img_name)
-            img = cv2.imread(img_path)
+        # UI Elements
+        self.status_label = tk.Label(root, text="", font=("Segoe UI", 11, "bold"), fg="#2b5797")
+        self.status_label.pack(pady=(12, 6))
 
-            if img is None:
-                continue
+        self.img_label = tk.Label(root, bg="#1e1e1e", width=460, height=150)
+        self.img_label.pack(pady=6)
 
-            # Resize image for clear display
-            display_img = cv2.resize(img, (400, 150), interpolation=cv2.INTER_NEAREST)
-            cv2.imshow("Plate Preview", display_img)
-            
-            # --- THE FIX ---
-            # Give OpenCV and Windows 100ms to physically draw the new image 
-            # before the input() function freezes the script.
-            cv2.waitKey(100) 
+        entry_frame = tk.Frame(root)
+        entry_frame.pack(pady=10)
 
-            user_input = input(f"[{idx}/{len(image_files)}] Text for '{img_name}': ").strip().upper()
+        tk.Label(entry_frame, text="Plate Text: ", font=("Segoe UI", 11)).pack(side=tk.LEFT)
+        self.entry = tk.Entry(entry_frame, font=("Segoe UI", 14, "bold"), width=16, justify='center')
+        self.entry.pack(side=tk.LEFT, padx=6)
+        self.entry.bind("<Return>", self.save_and_next)
 
-            if user_input == "EXIT":
-                print("\nSaving progress and exiting...")
-                break
+        btn_frame = tk.Frame(root)
+        btn_frame.pack(pady=4)
 
-            if user_input:
-                # Clean string (remove spaces and hyphens)
-                clean_text = user_input.replace(" ", "").replace("-", "")
-                f.write(f"{img_name},{clean_text}\n")
-                f.flush()  # Save progress immediately
+        tk.Button(btn_frame, text="Skip (Enter)", width=12, command=self.skip_image).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Save & Next", width=12, bg="#0078d4", fg="white", command=self.save_and_next).pack(side=tk.LEFT, padx=5)
 
-    except KeyboardInterrupt:
-        print("\n\n[INFO] Script stopped manually with Ctrl+C. Your progress is saved!")
-        
-    finally:
-        cv2.destroyAllWindows()
-        print(f"Progress safely logged in {OUTPUT_CSV}")
+        self.load_image()
+
+    def load_image(self):
+        if self.current_idx >= len(self.image_files):
+            messagebox.showinfo("Finished", "All images in the folder have been labeled!")
+            self.root.destroy()
+            return
+
+        img_name = self.image_files[self.current_idx]
+        progress_num = self.total_count - len(self.image_files) + self.current_idx + 1
+        self.status_label.config(text=f"[{progress_num}/{self.total_count}]  {img_name}")
+
+        img_path = os.path.join(CROPS_FOLDER, img_name)
+        try:
+            pil_img = Image.open(img_path)
+            pil_img = pil_img.resize((450, 140), Image.Resampling.BILINEAR)
+            self.tk_img = ImageTk.PhotoImage(pil_img)
+            self.img_label.config(image=self.tk_img)
+        except Exception as e:
+            print(f"Failed to load image {img_name}: {e}")
+
+        self.entry.delete(0, tk.END)
+        self.entry.focus_set()
+
+    def save_and_next(self, event=None):
+        raw_text = self.entry.get().strip().upper()
+        clean_text = raw_text.replace(" ", "").replace("-", "")
+
+        if clean_text:
+            img_name = self.image_files[self.current_idx]
+            with open(OUTPUT_CSV, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([img_name, clean_text])
+            self.labeled.add(img_name)
+
+        self.current_idx += 1
+        self.load_image()
+
+    def skip_image(self):
+        self.current_idx += 1
+        self.load_image()
+
+if __name__ == "__main__":
+    app_root = tk.Tk()
+    app = PlateLabelerApp(app_root)
+    app_root.mainloop()

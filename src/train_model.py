@@ -9,8 +9,8 @@ def train_model():
         data='data.yaml', # Ensure this points to your new dataset folder!
         epochs=50, 
         patience=20, 
-        imgsz=640,
-        batch=16, 
+        imgsz=1280,
+        batch=4, 
         device=0, 
         workers=2,
         
