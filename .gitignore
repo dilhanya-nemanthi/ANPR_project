@@ -17,5 +17,8 @@ img.jpg
 OIP.webp
 NEW-images/
 detected_plates.csv
+synthetic_labels.csv
+synthetic_plates/
+
 
 

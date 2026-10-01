@@ -12,22 +12,30 @@ import numpy as np
 from PIL import Image
 from ultralytics import YOLO
 from wpodnet import Predictor, load_wpodnet_from_checkpoint
+import uuid
 
 # Force FFmpeg to minimize RTSP network buffer delay
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|max_delay;500000"
 
 # --- 1. CONFIGURATION & CSV SETUP ---
+EDGE_CASE_DIR = "needs_review"
+os.makedirs(EDGE_CASE_DIR, exist_ok=True)
+
 CSV_FILE = "detected_plates.csv"
-COOLDOWN_SECONDS = 10.0  # Prevent logging duplicate plates within 10 seconds
-recent_plates = {}       # In-memory dictionary: {plate_text: last_logged_timestamp}
+COOLDOWN_SECONDS = 10.0  
+recent_plates = {}       
 csv_lock = threading.Lock()
+
+# --- NEW: TRIPWIRE CONFIGURATION ---
+# Set the line at 70% of the screen height. 
+# Adjust to 0.5 for the middle, or 0.85 for closer to the bottom.
+TRIPWIRE_Y_RATIO = 0.70 
 
 # Temporal smoothing buffers
 plate_history = deque(maxlen=8)
-STABILITY_THRESHOLD = 4  # Require at least 4 matching reads across recent frames
+STABILITY_THRESHOLD = 4  
 
 def init_csv():
-    """Create the CSV file with headers if it does not already exist."""
     if not os.path.exists(CSV_FILE):
         with open(CSV_FILE, mode="w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -35,8 +43,6 @@ def init_csv():
         print(f"[*] Initialized log file: {CSV_FILE}")
 
 def log_plate_to_csv(plate_text, confidence):
-    """Logs detected plates with timestamp while filtering out noise and duplicates."""
-    # Prevent logging rejected or unstable reads
     if not plate_text or plate_text in ("UNKNOWN", "ANALYZING...", "REJECTED") or len(plate_text) < 3:
         return
 
@@ -54,19 +60,24 @@ def log_plate_to_csv(plate_text, confidence):
 
         print(f"\n[CSV LOGGED] {timestamp_str} | Plate: {plate_text} | Conf: {confidence:.1f}%\n")
 
+def harvest_edge_cases(crop_img, confidence, text_prediction):
+    if 40.0 <= confidence <= 85.0 and crop_img is not None and crop_img.size > 0:
+        unique_id = uuid.uuid4().hex[:8]
+        safe_text = "".join(c for c in text_prediction if c.isalnum()) or "UNKNOWN"
+        filename = f"edge_{safe_text}_{confidence:.0f}_{unique_id}.jpg"
+        filepath = os.path.join(EDGE_CASE_DIR, filename)
+        
+        cv2.imwrite(filepath, crop_img)
+        print(f"[ACTIVE LEARNING] Saved edge case: {filepath}")
+
 # --- 2. POST-PROCESSING & STABILIZATION ---
 def correct_plate_syntax(raw_text):
-    """
-    Corrects common optical character recognition errors using structural position.
-    Rejects strings that are mathematically too short or too long to be plates.
-    """
     if not raw_text or len(raw_text) < 5 or len(raw_text) > 9:
         return "REJECTED"
 
     letter_to_num = {'O': '0', 'I': '1', 'Z': '2', 'S': '5', 'B': '8', 'G': '6', 'D': '0'}
     chars = list(raw_text)
 
-    # Standard syntax: last 4 positions must strictly be numeric digits
     num_suffix_len = min(4, len(chars))
     for i in range(len(chars) - num_suffix_len, len(chars)):
         if chars[i] in letter_to_num:
@@ -75,9 +86,6 @@ def correct_plate_syntax(raw_text):
     return "".join(chars)
 
 def stabilize_prediction(candidate_text):
-    """
-    Applies temporal majority voting to prevent frame-to-frame text flickering.
-    """
     if not candidate_text or candidate_text in ("UNKNOWN", "REJECTED"):
         return "ANALYZING..."
 
@@ -130,7 +138,6 @@ display_queue = queue.Queue(maxsize=3)
 running = True 
 
 def capture_frames(source):
-    """THREAD 1: Network Capture (Producer)"""
     global running
     print("[THREAD 1] Connecting to RTSP stream...")
     
@@ -156,7 +163,6 @@ def capture_frames(source):
     print("[THREAD 1] Capture stopped.")
 
 def process_detection(yolo_path, wpod_path, ocr_path):
-    """THREAD 2: Three-Stage Detection, Correction & CSV Logging"""
     global running
     print("[THREAD 2] Loading AI models on CUDA/GPU...")
     
@@ -174,17 +180,19 @@ def process_detection(yolo_path, wpod_path, ocr_path):
         if not frame_queue.empty():
             frame = frame_queue.get()
             annotated_frame = frame.copy()
+            
+            h, w = frame.shape[:2]
+            
+            # --- NEW: Draw the default Tripwire (Orange) ---
+            tripwire_y = int(h * TRIPWIRE_Y_RATIO)
+            cv2.line(annotated_frame, (0, tripwire_y), (w, tripwire_y), (0, 165, 255), 2)
 
-            # --- STAGE 1: YOLO Detection ---
-            # 65% Confidence Floor
-            yolo_results = yolo_model.predict(source=frame, conf=0.65, verbose=False)
+            yolo_results = yolo_model.predict(source=frame, conf=0.70, verbose=False)
             
             for box in yolo_results[0].boxes:
                 raw_x1, raw_y1, raw_x2, raw_y2 = map(int, box.xyxy[0])
                 yolo_conf = float(box.conf[0]) * 100
-                h, w = frame.shape[:2]
                 
-                # --- GEOMETRIC FILTER: Aspect Ratio Check ---
                 box_w = raw_x2 - raw_x1
                 box_h = raw_y2 - raw_y1
                 
@@ -193,18 +201,15 @@ def process_detection(yolo_path, wpod_path, ocr_path):
                     
                 aspect_ratio = box_w / float(box_h)
                 
-                # Reject shapes that are too square (<1.2) or too long/skinny (>5.5)
                 if aspect_ratio < 1.2 or aspect_ratio > 5.5:
                     continue 
 
-                # Apply 10px outer margin
                 pad = 10
                 x1 = max(0, raw_x1 - pad)
                 y1 = max(0, raw_y1 - pad)
                 x2 = min(w, raw_x2 + pad)
                 y2 = min(h, raw_y2 + pad)
                 
-                # --- STAGE 2: WPOD-NET Context Search ---
                 cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                 padded_w = x2 - x1
                 padded_h = y2 - y1
@@ -223,7 +228,7 @@ def process_detection(yolo_path, wpod_path, ocr_path):
                 
                 candidate_text = "UNKNOWN"
                 final_conf = yolo_conf
-                polygon_drawn = False
+                harvest_crop = None
                 
                 try:
                     prediction = wpod_predictor.predict(pil_image, scaling_ratio=1.0)
@@ -236,12 +241,11 @@ def process_detection(yolo_path, wpod_path, ocr_path):
                             pts_full.append([cx1 + px, cy1 + py])
                         pts_full_np = np.array(pts_full, dtype=np.float32)
                         
-                        # --- STAGE 3: Perspective Rectification ---
                         dst_pts = np.array([[0, 0], [128, 0], [128, 32], [0, 32]], dtype=np.float32)
                         matrix = cv2.getPerspectiveTransform(pts_full_np, dst_pts)
                         flat_plate = cv2.warpPerspective(frame, matrix, (128, 32))
+                        harvest_crop = flat_plate.copy()
                         
-                        # --- STAGE 4: CRNN OCR ---
                         gray_crop = cv2.cvtColor(flat_plate, cv2.COLOR_BGR2GRAY)
                         normalized = (gray_crop / 255.0 - 0.5) / 0.5
                         tensor_crop = torch.tensor(normalized, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(device)
@@ -250,19 +254,17 @@ def process_detection(yolo_path, wpod_path, ocr_path):
                             preds = ocr_model(tensor_crop)
                         candidate_text = decode_predictions(preds)
 
-                        # Render polygon border
                         pts_draw = np.array(pts_full, dtype=np.int32)
                         cv2.polylines(annotated_frame, [pts_draw], isClosed=True, color=(0, 255, 0), thickness=3)
                         text_pos = (pts_draw[0][0], max(25, pts_draw[0][1] - 10))
-                        polygon_drawn = True
                     else:
                         raise Exception("WPOD low confidence")
                         
                 except Exception:
-                    # FALLBACK: OCR directly on padded YOLO box
                     raw_crop = frame[y1:y2, x1:x2]
                     
                     if raw_crop.size > 0:
+                        harvest_crop = raw_crop.copy()
                         gray_crop = cv2.cvtColor(raw_crop, cv2.COLOR_BGR2GRAY)
                         gray_crop = cv2.resize(gray_crop, (128, 32))
                         normalized = (gray_crop / 255.0 - 0.5) / 0.5
@@ -275,24 +277,27 @@ def process_detection(yolo_path, wpod_path, ocr_path):
                     cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     text_pos = (x1, max(25, y1 - 10))
 
-                # --- NEW RENDERING LOGIC: VISIBLE DEBUGGING ---
+                harvest_edge_cases(harvest_crop, final_conf, candidate_text)
                 corrected_text = correct_plate_syntax(candidate_text)
                 
                 if corrected_text == "REJECTED":
-                    # Draw rejected reads in RED (Does not save to CSV)
                     label = f"REJECTED: {candidate_text} ({final_conf:.1f}%)"
                     cv2.putText(annotated_frame, label, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
-                    cv2.putText(annotated_frame, label, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2) 
+                    cv2.putText(annotated_frame, label, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 else:
-                    # Draw valid reads in GREEN and save to CSV
                     stable_text = stabilize_prediction(corrected_text)
                     label = f"{stable_text} ({final_conf:.1f}%)"
                     cv2.putText(annotated_frame, label, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
                     cv2.putText(annotated_frame, label, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                     
-                    log_plate_to_csv(stable_text, final_conf)
+                    # --- NEW: Tripwire Trigger Logic ---
+                    # Only save to CSV if the center of the plate (cy) has crossed the tripwire (tripwire_y)
+                    # Assumes cars drive *towards* the camera (moving from top to bottom)
+                    if cy > tripwire_y:
+                        # Briefly flash the line GREEN to show a successful crossing was logged
+                        cv2.line(annotated_frame, (0, tripwire_y), (w, tripwire_y), (0, 255, 0), 4)
+                        log_plate_to_csv(stable_text, final_conf)
 
-            # Keep queue pumping even when no plates are detected
             if display_queue.full():
                 try:
                     display_queue.get_nowait()
@@ -303,7 +308,6 @@ def process_detection(yolo_path, wpod_path, ocr_path):
             time.sleep(0.005)
 
 def main():
-    """MAIN THREAD: UI Display (Consumer)"""
     global running
     print("--- Starting Multi-Threaded ANPR Pipeline ---")
 
@@ -311,7 +315,6 @@ def main():
 
     rtsp_url = "rtsp://admin:It%40123aasl@10.64.64.16/Streaming/channels/001/?transportmode=unicast"
     
-    # Path configurations
     yolo_path = r"runs\detect\runs\detect\yolov8n_augmented_scratch-5\weights\best.pt"
     wpod_path = r"weights\wpodnet.pth"
     ocr_path = r"weights\crnn_ocr_best.pt"
