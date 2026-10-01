@@ -22,14 +22,12 @@ EDGE_CASE_DIR = "needs_review"
 os.makedirs(EDGE_CASE_DIR, exist_ok=True)
 
 CSV_FILE = "detected_plates.csv"
-COOLDOWN_SECONDS = 10.0  
-recent_plates = {}       
 csv_lock = threading.Lock()
 
-# --- NEW: TRIPWIRE CONFIGURATION ---
-# Set the line at 70% of the screen height. 
-# Adjust to 0.5 for the middle, or 0.85 for closer to the bottom.
+# --- TRIPWIRE & GATE LOGIC ---
 TRIPWIRE_Y_RATIO = 0.70 
+GATE_COOLDOWN = 8.0       # Wait 8 seconds before logging the next vehicle
+last_crossing_time = 0.0  # Global tracker for the tripwire
 
 # Temporal smoothing buffers
 plate_history = deque(maxlen=8)
@@ -43,22 +41,15 @@ def init_csv():
         print(f"[*] Initialized log file: {CSV_FILE}")
 
 def log_plate_to_csv(plate_text, confidence):
-    if not plate_text or plate_text in ("UNKNOWN", "ANALYZING...", "REJECTED") or len(plate_text) < 3:
-        return
+    timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    current_time = time.time()
-    last_logged_time = recent_plates.get(plate_text, 0)
+    with csv_lock:
+        with open(CSV_FILE, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([timestamp_str, plate_text, f"{confidence:.1f}"])
 
-    if current_time - last_logged_time > COOLDOWN_SECONDS:
-        recent_plates[plate_text] = current_time
-        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        with csv_lock:
-            with open(CSV_FILE, mode="a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([timestamp_str, plate_text, f"{confidence:.1f}"])
-
-        print(f"\n[CSV LOGGED] {timestamp_str} | Plate: {plate_text} | Conf: {confidence:.1f}%\n")
+    # This will now only print exactly once per vehicle crossing
+    print(f"\n[GATE TRIGGERED] {timestamp_str} | Plate: {plate_text} | Conf: {confidence:.1f}%\n")
 
 def harvest_edge_cases(crop_img, confidence, text_prediction):
     if 40.0 <= confidence <= 85.0 and crop_img is not None and crop_img.size > 0:
@@ -66,9 +57,7 @@ def harvest_edge_cases(crop_img, confidence, text_prediction):
         safe_text = "".join(c for c in text_prediction if c.isalnum()) or "UNKNOWN"
         filename = f"edge_{safe_text}_{confidence:.0f}_{unique_id}.jpg"
         filepath = os.path.join(EDGE_CASE_DIR, filename)
-        
         cv2.imwrite(filepath, crop_img)
-        print(f"[ACTIVE LEARNING] Saved edge case: {filepath}")
 
 # --- 2. POST-PROCESSING & STABILIZATION ---
 def correct_plate_syntax(raw_text):
@@ -163,7 +152,7 @@ def capture_frames(source):
     print("[THREAD 1] Capture stopped.")
 
 def process_detection(yolo_path, wpod_path, ocr_path):
-    global running
+    global running, last_crossing_time
     print("[THREAD 2] Loading AI models on CUDA/GPU...")
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -180,12 +169,16 @@ def process_detection(yolo_path, wpod_path, ocr_path):
         if not frame_queue.empty():
             frame = frame_queue.get()
             annotated_frame = frame.copy()
+            current_time = time.time()
             
             h, w = frame.shape[:2]
-            
-            # --- NEW: Draw the default Tripwire (Orange) ---
             tripwire_y = int(h * TRIPWIRE_Y_RATIO)
-            cv2.line(annotated_frame, (0, tripwire_y), (w, tripwire_y), (0, 165, 255), 2)
+            
+            # Keep the tripwire green for 1.5 seconds after a successful crossing
+            if current_time - last_crossing_time < 1.5:
+                cv2.line(annotated_frame, (0, tripwire_y), (w, tripwire_y), (0, 255, 0), 4)
+            else:
+                cv2.line(annotated_frame, (0, tripwire_y), (w, tripwire_y), (0, 165, 255), 2)
 
             yolo_results = yolo_model.predict(source=frame, conf=0.70, verbose=False)
             
@@ -200,7 +193,6 @@ def process_detection(yolo_path, wpod_path, ocr_path):
                     continue
                     
                 aspect_ratio = box_w / float(box_h)
-                
                 if aspect_ratio < 1.2 or aspect_ratio > 5.5:
                     continue 
 
@@ -290,13 +282,11 @@ def process_detection(yolo_path, wpod_path, ocr_path):
                     cv2.putText(annotated_frame, label, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 4)
                     cv2.putText(annotated_frame, label, text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                     
-                    # --- NEW: Tripwire Trigger Logic ---
-                    # Only save to CSV if the center of the plate (cy) has crossed the tripwire (tripwire_y)
-                    # Assumes cars drive *towards* the camera (moving from top to bottom)
-                    if cy > tripwire_y:
-                        # Briefly flash the line GREEN to show a successful crossing was logged
-                        cv2.line(annotated_frame, (0, tripwire_y), (w, tripwire_y), (0, 255, 0), 4)
-                        log_plate_to_csv(stable_text, final_conf)
+                    # --- NEW: Locked Gate Logic ---
+                    if cy > tripwire_y and stable_text not in ("ANALYZING...", "REJECTED"):
+                        if current_time - last_crossing_time > GATE_COOLDOWN:
+                            last_crossing_time = current_time
+                            log_plate_to_csv(stable_text, final_conf)
 
             if display_queue.full():
                 try:

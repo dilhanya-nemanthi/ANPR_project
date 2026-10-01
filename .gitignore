@@ -19,6 +19,7 @@ NEW-images/
 detected_plates.csv
 synthetic_labels.csv
 synthetic_plates/
+assets/
 
 
 
