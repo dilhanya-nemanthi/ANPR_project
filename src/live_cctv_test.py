@@ -25,7 +25,7 @@ CSV_FILE = "detected_plates.csv"
 csv_lock = threading.Lock()
 
 # --- TRIPWIRE & GATE LOGIC ---
-TRIPWIRE_Y_RATIO = 0.70 
+TRIPWIRE_Y_RATIO = 0.50 
 GATE_COOLDOWN = 8.0       # Wait 8 seconds before logging the next vehicle
 last_crossing_time = 0.0  # Global tracker for the tripwire
 
