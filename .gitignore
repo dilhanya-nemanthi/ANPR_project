@@ -20,6 +20,7 @@ detected_plates.csv
 synthetic_labels.csv
 synthetic_plates/
 assets/
+needs_review/
 
 
 
