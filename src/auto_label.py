@@ -3,7 +3,7 @@ import csv
 import easyocr
 
 # --- Configuration ---
-IMG_DIR = r"finalized_pplates"
+IMG_DIR = r"finalized_plates"
 CSV_OUTPUT = r"unified_labels.csv"
 
 def main():

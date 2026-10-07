@@ -4,8 +4,8 @@ import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-CROPS_DIR = r"C:\Users\User\Desktop\ANPR_project\Number plates\plates-images"        # Path to your crops folder
-CSV_PATH = r"C:\Users\User\Desktop\ANPR_project\Number plates\plates-labels.csv"
+CROPS_DIR = r"C:\Users\User\Desktop\ANPR_project\finalized_plates"        # Path to your crops folder
+CSV_PATH = r"C:\Users\User\Desktop\ANPR_project\unified_labels.csv"
 
 # 1. Load CSV
 df = pd.read_csv(CSV_PATH, header=None, names=['filename', 'label'])
